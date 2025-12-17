@@ -1,19 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Batch-wise Timetable</title>
+    <title>Faculty Filtered Timetable</title>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <style>
-        body {
-            font-family: Arial, sans-serif;
-        }
+        body { font-family: Arial, sans-serif; }
 
         table {
-            width: 80%;
+            width: 90%;
             border-collapse: collapse;
-            margin: 15px 0;
+            margin-bottom: 30px;
         }
 
         th, td {
@@ -23,7 +21,7 @@
         }
 
         th {
-            background-color: lightblue;
+            background: lightblue;
         }
 
         .batch-title {
@@ -32,161 +30,156 @@
             margin-top: 30px;
         }
 
-        button {
-            margin-bottom: 10px;
+        .highlight {
+            background-color: red;
+            color: white;
+            font-weight: bold;
         }
     </style>
 </head>
 
 <body>
 
-<h2>Upload CSV File</h2>
+<h2>Upload CSV</h2>
 <input type="file" id="csvFile" accept=".csv">
 
-<h3>Select Batch</h3>
-<select id="batchSelect">
-    <option value="">-- Select Batch --</option>
+<br><br>
+
+<label><b>Select Faculty:</b></label>
+<select id="facultySelect">
     <option value="ALL">ALL</option>
 </select>
 
 <div id="tables"></div>
 
 <script>
-let timetableData = {};
+let timetable = {};
 
-// Read CSV
+// Load CSV
 document.getElementById("csvFile").addEventListener("change", function () {
     Papa.parse(this.files[0], {
         header: true,
         skipEmptyLines: true,
-        complete: function (result) {
-            prepareTimetable(result.data);
-        }
+        complete: res => prepareData(res.data)
     });
 });
 
-// Prepare timetable object
-function prepareTimetable(data) {
-    timetableData = {};
+// Prepare timetable
+function prepareData(data) {
+    timetable = {};
+    const facultySet = new Set();
 
     data.forEach(row => {
         const batch = row.BATCH;
         const day = row.DAY;
-        const session = row.SESSION; // FN / AN
+        const session = row.SESSION;
         const course = row.COURSE;
         const room = row.ROOM;
-        const faculty = row.FACULTY;
+        const faculty = row.FACULTY?.trim();
 
-        if (!batch || !day || !session) return;
+        if (!batch || !day || !session || !faculty) return;
 
-        if (!timetableData[batch]) timetableData[batch] = {};
-        if (!timetableData[batch][day]) timetableData[batch][day] = { FN: "", AN: "" };
+        facultySet.add(faculty);
 
-        timetableData[batch][day][session] =
-            `${course}<br>Room: ${room}<br>Faculty: ${faculty}`;
+        if (!timetable[batch]) timetable[batch] = {};
+        if (!timetable[batch][day]) timetable[batch][day] = { FN: null, AN: null };
+
+        timetable[batch][day][session] = {
+            text: `${course}<br>Room: ${room}<br>${faculty}`,
+            faculty: faculty
+        };
     });
 
-    populateBatchList();
+    populateFacultyDropdown(facultySet);
+    renderTables("ALL");
 }
 
-// Populate dropdown
-function populateBatchList() {
-    const select = document.getElementById("batchSelect");
-    select.innerHTML = `
-        <option value="">-- Select Batch --</option>
-        <option value="ALL">ALL</option>
-    `;
+// Faculty dropdown
+function populateFacultyDropdown(facultySet) {
+    const select = document.getElementById("facultySelect");
+    select.innerHTML = `<option value="ALL">ALL</option>`;
 
-    Object.keys(timetableData).forEach(batch => {
-        const option = document.createElement("option");
-        option.value = batch;
-        option.textContent = batch;
-        select.appendChild(option);
+    [...facultySet].sort().forEach(fac => {
+        const opt = document.createElement("option");
+        opt.value = fac;
+        opt.textContent = fac;
+        select.appendChild(opt);
     });
 }
 
-// Handle selection
-document.getElementById("batchSelect").addEventListener("change", function () {
-    const value = this.value;
+// Faculty selection change
+document.getElementById("facultySelect").addEventListener("change", function () {
+    renderTables(this.value);
+});
+
+// Render tables
+function renderTables(selectedFaculty) {
     const container = document.getElementById("tables");
     container.innerHTML = "";
 
-    if (!value) return;
-
-    if (value === "ALL") {
-        Object.keys(timetableData).forEach(batch => {
-            buildTable(batch);
-        });
-    } else {
-        buildTable(value);
-    }
-});
-
-// Build timetable table
-function buildTable(batch) {
-    const container = document.getElementById("tables");
     const days = ["MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
-    const title = document.createElement("div");
-    title.className = "batch-title";
-    title.innerHTML = `Batch: ${batch}`;
+    for (const batch in timetable) {
 
-    const btn = document.createElement("button");
-    btn.textContent = "Print Timetable";
-    btn.onclick = () => printTable(batch);
+        // 🔹 Check if faculty exists in this batch
+        let facultyPresent = false;
 
-    const table = document.createElement("table");
-    table.id = `table_${batch}`;
+        if (selectedFaculty !== "ALL") {
+            days.forEach(day => {
+                ["FN", "AN"].forEach(session => {
+                    const cell = timetable[batch][day]?.[session];
+                    if (cell && cell.faculty === selectedFaculty) {
+                        facultyPresent = true;
+                    }
+                });
+            });
 
-    let html = `
-        <tr>
-            <th>DAY</th>
-            <th>FN</th>
-            <th rowspan="7">L<br>U<br>N<br>C<br>H</th>
-            <th>AN</th>
-        </tr>
-    `;
+            if (!facultyPresent) continue; // 🚫 Skip this batch
+        }
 
-    days.forEach(day => {
-        html += `
+        const title = document.createElement("div");
+        title.className = "batch-title";
+        title.textContent = `Batch: ${batch}`;
+        container.appendChild(title);
+
+        const table = document.createElement("table");
+
+        let html = `
             <tr>
-                <td>${day}</td>
-                <td>${timetableData[batch][day]?.FN || ""}</td>
-                <td>${timetableData[batch][day]?.AN || ""}</td>
+                <th>DAY</th>
+                <th>FN</th>
+                <th rowspan="7">L<br>U<br>N<br>C<br>H</th>
+                <th>AN</th>
             </tr>
         `;
-    });
 
-    table.innerHTML = html;
+        days.forEach(day => {
+            html += `<tr><td>${day}</td>`;
 
-    container.appendChild(title);
-    container.appendChild(btn);
-    container.appendChild(table);
-}
+            ["FN", "AN"].forEach(session => {
+                const cell = timetable[batch][day]?.[session];
 
-// Print one batch
-function printTable(batch) {
-    const tableHTML = document.getElementById(`table_${batch}`).outerHTML;
+                if (!cell) {
+                    html += `<td></td>`;
+                } else {
+                    const highlight =
+                        selectedFaculty !== "ALL" &&
+                        cell.faculty === selectedFaculty;
 
-    const win = window.open("", "", "width=900,height=600");
-    win.document.write(`
-        <html>
-        <head>
-            <title>Print Timetable</title>
-            <style>
-                table { width: 100%; border-collapse: collapse; }
-                th, td { border: 1px solid black; padding: 8px; text-align: center; }
-                th { background: lightblue; }
-            </style>
-        </head>
-        <body>
-            <h2>Batch: ${batch}</h2>
-            ${tableHTML}
-        </body>
-        </html>
-    `);
-    win.document.close();
-    win.print();
+                    html += `
+                        <td class="${highlight ? 'highlight' : ''}">
+                            ${cell.text}
+                        </td>
+                    `;
+                }
+            });
+
+            html += `</tr>`;
+        });
+
+        table.innerHTML = html;
+        container.appendChild(table);
+    }
 }
 </script>
 
